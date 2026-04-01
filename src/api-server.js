@@ -7,11 +7,50 @@ import http from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, updateConfig } from './config.js';
 import { logger, initLogWebSocket, getLogBuffer } from './logger.js';
+import { mediaToMarkdownText } from './onebot-client.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+/**
+ * 解析 OpenAI 多模态 content 格式，转换为 text + OneBot 消息段
+ * OpenAI content 可以是 string 或 array:
+ *   [ { type: 'text', text: '...' }, { type: 'image_url', image_url: { url: '...' } } ]
+ * @param {string|Array} content
+ * @returns {{ text: string, segments: Array }} text 和额外的 OneBot segment
+ */
+function parseOpenAIContent(content) {
+  if (typeof content === 'string') {
+    return { text: content, segments: [] };
+  }
+
+  if (!Array.isArray(content)) {
+    return { text: String(content || ''), segments: [] };
+  }
+
+  const textParts = [];
+  const segments = [];
+
+  for (const part of content) {
+    if (part.type === 'text') {
+      textParts.push(part.text || '');
+    } else if (part.type === 'image_url') {
+      const url = part.image_url?.url || '';
+      if (url) {
+        // Base64 data URL 或 HTTP URL 都支持
+        segments.push({
+          type: 'image',
+          data: { file: url },
+        });
+      }
+    }
+    // 未来可以这里拓展支持 input_audio 等
+  }
+
+  return { text: textParts.join('\n'), segments };
+}
 
 /**
  * 创建 Bridge API 服务器 (OpenAI 兼容端点)
@@ -85,36 +124,57 @@ export function createBridgeServer(onebotClient) {
       });
     }
 
-    // 构造发送文本
-    let sendText;
+    // 构造发送内容：支持多模态 content
+    let sendText = '';
+    let mediaSegments = [];
+
     if (config.contextMode === 'full') {
       // 拼接完整对话历史
-      sendText = messages.map(m => {
+      const parts = [];
+      for (const m of messages) {
         const role = m.role === 'user' ? '用户' : m.role === 'assistant' ? '助手' : '系统';
-        return `[${role}]: ${m.content}`;
-      }).join('\n');
+        const parsed = parseOpenAIContent(m.content);
+        parts.push(`[${role}]: ${parsed.text}`);
+        // 只在最后一条消息中带上媒体段
+        if (m === messages[messages.length - 1]) {
+          mediaSegments = parsed.segments;
+        }
+      }
+      sendText = parts.join('\n');
     } else {
       // 只取最后一条 user 消息
       const lastUser = [...messages].reverse().find(m => m.role === 'user');
-      sendText = lastUser?.content || '';
+      if (lastUser) {
+        const parsed = parseOpenAIContent(lastUser.content);
+        sendText = parsed.text;
+        mediaSegments = parsed.segments;
+      }
     }
 
-    if (!sendText.trim()) {
+    if (!sendText.trim() && mediaSegments.length === 0) {
       return res.status(400).json({
         error: { message: '消息内容为空', type: 'invalid_request_error' },
       });
+    }
+
+    if (mediaSegments.length > 0) {
+      logger.info(`[API] 🖼️ 检测到 ${mediaSegments.length} 个媒体段 (图片/文件)`);
     }
 
     const requestId = uuidv4().slice(0, 8);
     logger.info(`[API] 📥 收到请求 req=${requestId} model=${model || 'default'} target=${groupId || userId}`);
 
     try {
-      const replyText = await onebotClient.sendAndWaitReply({
+      const replyMedia = await onebotClient.sendAndWaitReply({
         groupId: groupId || '',
         userId: groupId ? '' : userId,
         text: sendText,
+        segments: mediaSegments,
         timeoutMs: config.replyTimeoutMs,
       });
+
+      // 将回复的多模态内容转换为 Markdown 文本
+      const replyText = mediaToMarkdownText(replyMedia);
 
       const completionId = `chatcmpl-qq-${requestId}`;
       const responseBody = {
@@ -275,13 +335,14 @@ export function createWebuiServer(onebotClient) {
     }
 
     try {
-      const reply = await onebotClient.sendAndWaitReply({
+      const replyMedia = await onebotClient.sendAndWaitReply({
         groupId: targetGroup || '',
         userId: targetGroup ? '' : targetUser,
         text: text || '连通性测试 / Bridge Test',
         timeoutMs: config.replyTimeoutMs,
       });
-      res.json({ status: 'ok', reply });
+      const replyText = mediaToMarkdownText(replyMedia);
+      res.json({ status: 'ok', reply: replyText });
     } catch (err) {
       res.json({ status: 'error', error: err.message });
     }

@@ -112,6 +112,161 @@ function extractForwardText(message) {
   return texts.filter(Boolean).join('\n');
 }
 
+// ---- 多模态消息提取 ----
+/**
+ * 从 OneBot 消息段数组中提取所有富媒体内容
+ * @param {Array} segments - OneBot message segment 数组
+ * @returns {{ text: string, images: Array, files: Array, audio: Array, video: Array }}
+ */
+function extractMultimodalContent(segments) {
+  const result = { text: '', images: [], files: [], audio: [], video: [] };
+  if (!Array.isArray(segments)) return result;
+
+  const textParts = [];
+
+  for (const seg of segments) {
+    switch (seg.type) {
+      case 'text':
+        textParts.push(seg.data?.text || '');
+        break;
+
+      case 'image': {
+        const url = seg.data?.url || seg.data?.file || '';
+        const fileId = seg.data?.file_id || '';
+        if (url || fileId) {
+          result.images.push({
+            url: url,
+            file_id: fileId,
+            file_size: seg.data?.file_size || '',
+            file_unique: seg.data?.file_unique || '',
+          });
+        }
+        break;
+      }
+
+      case 'file': {
+        const url = seg.data?.url || seg.data?.file || '';
+        const name = seg.data?.name || 'file';
+        result.files.push({
+          name,
+          url,
+          file_id: seg.data?.file_id || '',
+          file_size: seg.data?.file_size || '',
+        });
+        break;
+      }
+
+      case 'record': {
+        const url = seg.data?.url || seg.data?.file || '';
+        result.audio.push({
+          url,
+          file_id: seg.data?.file_id || '',
+          file_size: seg.data?.file_size || '',
+        });
+        break;
+      }
+
+      case 'video': {
+        const url = seg.data?.url || seg.data?.file || '';
+        result.video.push({
+          url,
+          file_id: seg.data?.file_id || '',
+          file_size: seg.data?.file_size || '',
+          name: seg.data?.name || 'video',
+        });
+        break;
+      }
+
+      case 'forward': {
+        // 合并转发提取文本（递归）
+        textParts.push(extractForwardText([seg]));
+        break;
+      }
+
+      // reply / at / face 等不提取
+      default:
+        break;
+    }
+  }
+
+  result.text = textParts.join('');
+  return result;
+}
+
+/**
+ * 将富媒体结构体序列化为 OpenAI content 格式
+ * @param {{ text, images, files, audio, video }} media
+ * @returns {string | Array} OpenAI content (string 或 content 数组)
+ */
+export function mediaToOpenAIContent(media) {
+  const hasMedia = media.images.length > 0 || media.files.length > 0 || media.audio.length > 0 || media.video.length > 0;
+
+  if (!hasMedia) {
+    return media.text;
+  }
+
+  // 构造 OpenAI 多模态 content 数组
+  const contentParts = [];
+
+  // 文本部分
+  if (media.text) {
+    contentParts.push({ type: 'text', text: media.text });
+  }
+
+  // 图片 → image_url
+  for (const img of media.images) {
+    if (img.url) {
+      contentParts.push({
+        type: 'image_url',
+        image_url: { url: img.url },
+      });
+    }
+  }
+
+  // 文件/音频/视频 → 附加为文本描述 + URL
+  for (const f of media.files) {
+    contentParts.push({
+      type: 'text',
+      text: `\n📎 [文件: ${f.name}](${f.url})`,
+    });
+  }
+  for (const a of media.audio) {
+    contentParts.push({
+      type: 'text',
+      text: `\n🎵 [语音消息](${a.url})`,
+    });
+  }
+  for (const v of media.video) {
+    contentParts.push({
+      type: 'text',
+      text: `\n🎬 [视频: ${v.name}](${v.url})`,
+    });
+  }
+
+  return contentParts;
+}
+
+/**
+ * 将富媒体结构体序列化为纯文本 (Markdown 风格，含图片链接)
+ */
+export function mediaToMarkdownText(media) {
+  const parts = [];
+  if (media.text) parts.push(media.text);
+  for (const img of media.images) {
+    if (img.url) parts.push(`![image](${img.url})`);
+  }
+  for (const f of media.files) {
+    parts.push(`📎 [${f.name}](${f.url})`);
+  }
+  for (const a of media.audio) {
+    parts.push(`🎵 [语音消息](${a.url})`);
+  }
+  for (const v of media.video) {
+    parts.push(`🎬 [${v.name}](${v.url})`);
+  }
+  return parts.join('\n');
+}
+
 // ---- OneBot Client Class ----
 export class OneBotClient {
   constructor() {
@@ -253,27 +408,23 @@ export class OneBotClient {
       }
     }
 
-    // 提取纯文本 — 优先尝试从合并转发中提取
-    let text = '';
+    // 提取多模态内容（文本 + 图片 + 文件 + 音频 + 视频）
+    let media;
     if (typeof msg.message === 'string') {
-      text = msg.message;
+      media = { text: msg.message, images: [], files: [], audio: [], video: [] };
     } else if (Array.isArray(msg.message)) {
-      // 检查是否包含合并转发消息
-      const hasForward = msg.message.some(seg => seg.type === 'forward');
-      if (hasForward) {
-        text = extractForwardText(msg.message);
-        logger.debug(`[OneBot] 📦 从合并转发中提取文本 (${text.length} 字符)`);
-      } else {
-        text = msg.message
-          .filter(seg => seg.type === 'text')
-          .map(seg => seg.data?.text || '')
-          .join('');
-      }
+      media = extractMultimodalContent(msg.message);
+    } else {
+      media = { text: '', images: [], files: [], audio: [], video: [] };
     }
-    if (!text.trim()) return;
+
+    const text = media.text;
+    const hasMedia = media.images.length > 0 || media.files.length > 0 || media.audio.length > 0 || media.video.length > 0;
+    if (!text.trim() && !hasMedia) return;
 
     const messageId = String(msg.message_id || '');
-    logger.info(`[OneBot] ← 收到消息 [${msg.message_type}] from ${senderId}${groupId ? ` in group ${groupId}` : ''}: ${stripZeroWidth(text).slice(0, 100)}`);
+    const mediaInfo = hasMedia ? ` [+${media.images.length}img ${media.files.length}file ${media.audio.length}audio ${media.video.length}video]` : '';
+    logger.info(`[OneBot] ← 收到消息 [${msg.message_type}] from ${senderId}${groupId ? ` in group ${groupId}` : ''}${mediaInfo}: ${stripZeroWidth(text).slice(0, 100)}`);
 
     // 尝试匹配 pending request
 
@@ -290,8 +441,8 @@ export class OneBotClient {
       // 通过 sentMsgId 匹配
       for (const [reqId, pending] of this.pendingReplies) {
         if (pending.sentMsgId === replyToMsgId) {
-          const cleanText = stripZeroWidth(text);
-          this.resolveReply(reqId, cleanText);
+          media.text = stripZeroWidth(media.text);
+          this.resolveReply(reqId, media);
           return;
         }
       }
@@ -300,8 +451,8 @@ export class OneBotClient {
     // 策略2: 尝试从消息中解码零宽字符 reqId (如果对方复制了原始消息)
     const decodedReqId = decodeReqId(text);
     if (decodedReqId && this.pendingReplies.has(decodedReqId)) {
-      const cleanText = stripZeroWidth(text);
-      this.resolveReply(decodedReqId, cleanText);
+      media.text = stripZeroWidth(media.text);
+      this.resolveReply(decodedReqId, media);
       return;
     }
 
@@ -310,21 +461,23 @@ export class OneBotClient {
       const matchGroup = pending.groupId && pending.groupId === groupId;
       const matchUser = pending.userId && pending.userId === senderId && !groupId;
       if (matchGroup || matchUser) {
-        const cleanText = stripZeroWidth(text);
-        this.resolveReply(reqId, cleanText);
+        media.text = stripZeroWidth(media.text);
+        this.resolveReply(reqId, media);
         return;
       }
     }
   }
 
-  resolveReply(reqId, text) {
+  resolveReply(reqId, media) {
     const pending = this.pendingReplies.get(reqId);
     if (!pending) return;
     this.pendingReplies.delete(reqId);
     clearTimeout(pending.timer);
     this.stats.repliesReceived++;
-    logger.info(`[OneBot] ✅ 匹配回复 req=${reqId}: ${text.slice(0, 80)}...`);
-    pending.resolve(text);
+    const preview = (media.text || '').slice(0, 60);
+    const mediaCount = (media.images?.length || 0) + (media.files?.length || 0) + (media.audio?.length || 0) + (media.video?.length || 0);
+    logger.info(`[OneBot] ✅ 匹配回复 req=${reqId}: ${preview}${mediaCount > 0 ? ` [+${mediaCount} media]` : ''}`);
+    pending.resolve(media);
   }
 
   /**
@@ -333,15 +486,17 @@ export class OneBotClient {
    * @param {string} options.groupId - 群号 (与 userId 二选一)
    * @param {string} options.userId - 好友 QQ (与 groupId 二选一)
    * @param {string} options.text - 发送的文本
+   * @param {Array} [options.segments] - 额外的 OneBot 消息段 (图片/文件等)
    * @param {number} options.timeoutMs - 超时
-   * @returns {Promise<string>} 回复文本
+   * @returns {Promise<{text, images, files, audio, video}>} 富媒体回复
    */
-  async sendAndWaitReply({ groupId, userId, text, timeoutMs }) {
+  async sendAndWaitReply({ groupId, userId, text, segments = [], timeoutMs }) {
     const config = getConfig();
     const reqId = shortId();
     const taggedText = text + encodeReqId(reqId);
     const threshold = config.forwardMsgThreshold || 2000;
-    const useForward = taggedText.length > threshold;
+    const hasExtraMedia = segments.length > 0;
+    const useForward = !hasExtraMedia && taggedText.length > threshold;
 
     // 构造发送参数
     let action, params;
@@ -359,7 +514,7 @@ export class OneBotClient {
         action = 'send_group_msg';
         params = {
           group_id: groupId,
-          message: [{ type: 'text', data: { text: taggedText } }],
+          message: [{ type: 'text', data: { text: taggedText } }, ...segments],
         };
       }
     } else if (userId) {
@@ -375,7 +530,7 @@ export class OneBotClient {
         action = 'send_private_msg';
         params = {
           user_id: userId,
-          message: [{ type: 'text', data: { text: taggedText } }],
+          message: [{ type: 'text', data: { text: taggedText } }, ...segments],
         };
       }
     } else {
