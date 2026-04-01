@@ -108,13 +108,21 @@ export function createBridgeServer(onebotClient) {
     }
 
     const { messages, model, stream } = req.body;
-    // 从请求中提取动态 group_id / user_id
-    const groupId = req.body.group_id || req.body.extra?.group_id || config.defaultGroupId;
-    const userId = req.body.user_id || req.body.extra?.user_id || config.defaultUserId;
+    
+    // 从请求中提取动态 group_id / user_id 或全局默认配置
+    let groupId = req.body.group_id || req.body.extra?.group_id || config.defaultGroupId;
+    let userId = req.body.user_id || req.body.extra?.user_id || config.defaultUserId;
+
+    // 🌟 智能模型路由：根据所选模型强行决定发送目标
+    if (model === 'qlaude-opus-4-6') {
+      groupId = ''; // 选了 qlaude，强行清空群聊 ID，只按私聊路由
+    } else if (model === 'qpt-5.4') {
+      userId = '';  // 选了 qpt，强行清空私聊 ID，只按群聊路由
+    }
 
     if (!groupId && !userId) {
       return res.status(400).json({
-        error: { message: '未配置目标群号或好友 QQ，请在 WebUI 中设置或请求中传入 group_id', type: 'config_error' },
+        error: { message: `所选模型 [${model || '未知'}] 的目标配置为空（你可能没有在 WebUI 配置默认好友/默认群）`, type: 'config_error' },
       });
     }
 
