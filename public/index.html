@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QQ-OpenAI Bridge · 控制面板</title>
+  <meta name="description" content="QQ-to-OpenAI Bridge 网关控制面板 — 实时监控、配置管理、连通测试">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <h1 class="header-title">QQ-OpenAI Bridge</h1>
+        <p class="header-sub">协议转换网关控制面板</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-badges">
+        <span id="badge-ws" class="badge badge-offline">
+          <span class="badge-dot"></span>
+          <span id="badge-ws-text">OneBot 离线</span>
+        </span>
+        <span id="badge-service" class="badge badge-offline">
+          <span class="badge-dot"></span>
+          <span id="badge-service-text">服务已停</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Stats Row -->
+    <section class="stats-row">
+      <div class="stat-card">
+        <div class="stat-icon" style="--accent: #6366f1;">📤</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-sent">0</div>
+          <div class="stat-label">已发送</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="--accent: #10b981;">📥</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-replies">0</div>
+          <div class="stat-label">已回复</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="--accent: #f59e0b;">⏰</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-timeouts">0</div>
+          <div class="stat-label">超时</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="--accent: #ef4444;">❌</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-errors">0</div>
+          <div class="stat-label">错误</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon" style="--accent: #8b5cf6;">⏳</div>
+        <div class="stat-body">
+          <div class="stat-value" id="stat-pending">0</div>
+          <div class="stat-label">等待中</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Control Panel Grid -->
+    <section class="panel-grid">
+      <!-- Left Column: Config + Controls -->
+      <div class="panel-left">
+        <!-- Quick Actions -->
+        <div class="card" id="card-actions">
+          <div class="card-header">
+            <h2>🎮 快捷操作</h2>
+          </div>
+          <div class="card-body actions-grid">
+            <button class="btn btn-primary" id="btn-toggle" onclick="toggleService()">
+              <span id="btn-toggle-icon">▶</span>
+              <span id="btn-toggle-text">启用服务</span>
+            </button>
+            <button class="btn btn-secondary" onclick="reconnect()">
+              🔄 重新连接
+            </button>
+          </div>
+        </div>
+
+        <!-- Configuration -->
+        <div class="card" id="card-config">
+          <div class="card-header">
+            <h2>⚙️ 配置管理</h2>
+          </div>
+          <div class="card-body">
+            <form id="config-form" onsubmit="saveConfig(event)">
+              <div class="form-group">
+                <label for="cfg-napcatWsUrl">NapCat WS 地址</label>
+                <input type="text" id="cfg-napcatWsUrl" placeholder="ws://127.0.0.1:3001">
+              </div>
+              <div class="form-group">
+                <label for="cfg-napcatToken">NapCat Token</label>
+                <input type="password" id="cfg-napcatToken" placeholder="留空则不鉴权">
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="cfg-defaultGroupId">默认群号</label>
+                  <input type="text" id="cfg-defaultGroupId" placeholder="QQ群号">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-defaultUserId">默认好友 QQ</label>
+                  <input type="text" id="cfg-defaultUserId" placeholder="QQ号">
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="cfg-whitelistUsers">白名单用户 (逗号分隔)</label>
+                <input type="text" id="cfg-whitelistUsers" placeholder="留空则不过滤">
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="cfg-replyTimeoutMs">回复超时 (ms)</label>
+                  <input type="number" id="cfg-replyTimeoutMs" value="60000">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-rateLimitMs">限流间隔 (ms)</label>
+                  <input type="number" id="cfg-rateLimitMs" value="1500">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="cfg-apiKey">Bridge API Key</label>
+                  <input type="text" id="cfg-apiKey" placeholder="sk-qq-bridge">
+                </div>
+                <div class="form-group">
+                  <label for="cfg-contextMode">上下文模式</label>
+                  <select id="cfg-contextMode">
+                    <option value="last">仅最后一条消息</option>
+                    <option value="full">完整对话历史</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-accent full-width">💾 保存配置</button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Connectivity Test -->
+        <div class="card" id="card-test">
+          <div class="card-header">
+            <h2>🧪 连通性测试</h2>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label for="test-text">测试消息</label>
+              <input type="text" id="test-text" value="Hello from Bridge!" placeholder="输入测试消息">
+            </div>
+            <button class="btn btn-secondary full-width" id="btn-test" onclick="sendTest()">
+              📡 发送测试
+            </button>
+            <div id="test-result" class="test-result hidden"></div>
+          </div>
+        </div>
+
+        <!-- Usage Guide -->
+        <div class="card" id="card-usage">
+          <div class="card-header">
+            <h2>📖 接入指南</h2>
+          </div>
+          <div class="card-body usage-body">
+            <p class="usage-desc">在任意支持 OpenAI API 的客户端中使用以下配置:</p>
+            <div class="usage-item">
+              <span class="usage-label">Base URL</span>
+              <code class="usage-code" id="usage-baseurl">http://127.0.0.1:9520</code>
+            </div>
+            <div class="usage-item">
+              <span class="usage-label">API Key</span>
+              <code class="usage-code" id="usage-apikey">sk-qq-bridge</code>
+            </div>
+            <div class="usage-item">
+              <span class="usage-label">Model</span>
+              <code class="usage-code">qq-group-chat</code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Live Logs -->
+      <div class="panel-right">
+        <div class="card card-logs" id="card-logs">
+          <div class="card-header">
+            <h2>📊 实时日志</h2>
+            <div class="log-controls">
+              <button class="btn-icon" onclick="clearLogs()" title="清空日志">🗑️</button>
+              <button class="btn-icon" id="btn-autoscroll" onclick="toggleAutoScroll()" title="自动滚动">📌</button>
+            </div>
+          </div>
+          <div class="log-container" id="log-container">
+            <div class="log-empty">等待日志...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>QQ-OpenAI Bridge © 2026 · Powered by NapCat OneBot</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
