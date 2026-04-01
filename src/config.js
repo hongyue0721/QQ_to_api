@@ -25,6 +25,7 @@ const runtimeConfig = {
   replyTimeoutMs: parseInt(process.env.REPLY_TIMEOUT_MS || '60000', 10),
   rateLimitMs: parseInt(process.env.RATE_LIMIT_MS || '1500', 10),
   apiKey: process.env.API_KEY || 'sk-qq-bridge',
+  forwardMsgThreshold: parseInt(process.env.FORWARD_MSG_THRESHOLD || '2000', 10), // 超过此字数自动用合并转发
   // 运行时状态
   serviceEnabled: true,
   contextMode: 'last', // 'last' = 只发最后一条 user 消息, 'full' = 拼接完整对话

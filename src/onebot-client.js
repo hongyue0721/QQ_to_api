@@ -57,6 +57,61 @@ function shortId() {
   return uuidv4().replace(/-/g, '').slice(0, 8);
 }
 
+// ---- 长文本切分 ----
+function splitTextToChunks(text, maxLen = 2000) {
+  const chunks = [];
+  // 优先按段落分割
+  const paragraphs = text.split(/\n\n+/);
+  let current = '';
+  for (const para of paragraphs) {
+    if (para.length > maxLen) {
+      // 段落本身就超长，按 maxLen 硬切
+      if (current) { chunks.push(current); current = ''; }
+      for (let i = 0; i < para.length; i += maxLen) {
+        chunks.push(para.slice(i, i + maxLen));
+      }
+    } else if ((current + '\n\n' + para).length > maxLen) {
+      if (current) chunks.push(current);
+      current = para;
+    } else {
+      current = current ? current + '\n\n' + para : para;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length > 0 ? chunks : [text];
+}
+
+// 构造合并转发 node 数组
+function buildForwardNodes(chunks, senderName = 'Bridge', senderUin = '10001') {
+  return chunks.map((chunk, i) => ({
+    type: 'node',
+    data: {
+      name: chunks.length > 1 ? `${senderName} (${i + 1}/${chunks.length})` : senderName,
+      uin: senderUin,
+      content: [{ type: 'text', data: { text: chunk } }],
+    },
+  }));
+}
+
+// 从合并转发消息中递归提取所有文本
+function extractForwardText(message) {
+  if (!Array.isArray(message)) return '';
+  const texts = [];
+  for (const seg of message) {
+    if (seg.type === 'text') {
+      texts.push(seg.data?.text || '');
+    } else if (seg.type === 'forward') {
+      // 合并转发内可能嵌套 node 列表
+      const nodes = seg.data?.content || seg.data?.messages || [];
+      for (const node of nodes) {
+        const innerMsg = node.data?.content || node.content || [];
+        texts.push(extractForwardText(Array.isArray(innerMsg) ? innerMsg : []));
+      }
+    }
+  }
+  return texts.filter(Boolean).join('\n');
+}
+
 // ---- OneBot Client Class ----
 export class OneBotClient {
   constructor() {
@@ -198,15 +253,22 @@ export class OneBotClient {
       }
     }
 
-    // 提取纯文本
+    // 提取纯文本 — 优先尝试从合并转发中提取
     let text = '';
     if (typeof msg.message === 'string') {
       text = msg.message;
     } else if (Array.isArray(msg.message)) {
-      text = msg.message
-        .filter(seg => seg.type === 'text')
-        .map(seg => seg.data?.text || '')
-        .join('');
+      // 检查是否包含合并转发消息
+      const hasForward = msg.message.some(seg => seg.type === 'forward');
+      if (hasForward) {
+        text = extractForwardText(msg.message);
+        logger.debug(`[OneBot] 📦 从合并转发中提取文本 (${text.length} 字符)`);
+      } else {
+        text = msg.message
+          .filter(seg => seg.type === 'text')
+          .map(seg => seg.data?.text || '')
+          .join('');
+      }
     }
     if (!text.trim()) return;
 
@@ -278,21 +340,44 @@ export class OneBotClient {
     const config = getConfig();
     const reqId = shortId();
     const taggedText = text + encodeReqId(reqId);
+    const threshold = config.forwardMsgThreshold || 2000;
+    const useForward = taggedText.length > threshold;
 
     // 构造发送参数
     let action, params;
     if (groupId) {
-      action = 'send_group_msg';
-      params = {
-        group_id: groupId,
-        message: [{ type: 'text', data: { text: taggedText } }],
-      };
+      if (useForward) {
+        // 超长文本 → 合并转发
+        const chunks = splitTextToChunks(taggedText, threshold);
+        action = 'send_group_forward_msg';
+        params = {
+          group_id: groupId,
+          messages: buildForwardNodes(chunks),
+        };
+        logger.info(`[OneBot] 📦 长文本分为 ${chunks.length} 段合并转发 (总 ${taggedText.length} 字)`);
+      } else {
+        action = 'send_group_msg';
+        params = {
+          group_id: groupId,
+          message: [{ type: 'text', data: { text: taggedText } }],
+        };
+      }
     } else if (userId) {
-      action = 'send_private_msg';
-      params = {
-        user_id: userId,
-        message: [{ type: 'text', data: { text: taggedText } }],
-      };
+      if (useForward) {
+        const chunks = splitTextToChunks(taggedText, threshold);
+        action = 'send_private_forward_msg';
+        params = {
+          user_id: userId,
+          messages: buildForwardNodes(chunks),
+        };
+        logger.info(`[OneBot] 📦 长文本分为 ${chunks.length} 段合并转发 (总 ${taggedText.length} 字)`);
+      } else {
+        action = 'send_private_msg';
+        params = {
+          user_id: userId,
+          message: [{ type: 'text', data: { text: taggedText } }],
+        };
+      }
     } else {
       throw new Error('必须指定 group_id 或 user_id');
     }
