@@ -29,7 +29,7 @@
 ## ✨ 变态... 哦不，强大特性
 
 - 🕵️ **真·图灵防线**：100% 纯人类自然语言模型（也可能夹杂群友自带的 AI bot）。
-- 🔌 **完美伪装**：完整实现了 `/v1/chat/completions` 和 `/v1/models`，任何支持 OpenAI 格式的套壳 UI 或工具都能直接连。包含模型 `qq-group-chat` 和 `qq-private-chat`。
+- 🔌 **完美伪装**：完整实现了 `/v1/chat/completions` 和 `/v1/models`，任何支持 OpenAI 格式的套壳 UI 或工具都能直接连。包含模型 `qpt-5.4` 和 `qlaude-opus-4-6`。
 - 🔮 **异步转同步魔法**：基于零宽字符请求标记和消息引用树，并发消息也不会串线，谁回你抓谁！
 - 🏎️ **防风控限流**：内置令牌桶，控制发消息频率（不会因为群友太热情导致你 QQ 号被风控封神）。
 - 🎛️ **赛博魅魔控制面板（WebUI）**：提供极具科技感的玻璃色主题后台面板！能实时修改截获群号、看聊天日志流、一键拉闸。
@@ -78,10 +78,10 @@ chmod +x start.sh
 
 1. **接口地址 (Base URL)**: `http://你的服务器IP:9520` *(如果用了 OneApi 就填你 OneApi 的地址)*
 2. **API Key (Bearer)**: `sk-qq-bridge`
-3. **支持模型名称**: 必须手动加上并选用 `qq-group-chat` 或 `qq-private-chat`。
+3. **支持模型名称**: 必须手动加上并选用 `qpt-5.4` 或 `qlaude-opus-4-6`。
 
 > ⚠️ **OneApi 用户必看防踩坑**：
-> 如果你把这个 Bridge 接到了 One API 上，请务必在你的渠道（Channel）配置里，把 `qq-group-chat` 和 `qq-private-chat` 当做自定义模型添加进去！否则 One API 会嫌弃它们并发个 `no available channels` 报错。
+> 如果你把这个 Bridge 接到了 One API 上，请务必在你的渠道（Channel）配置里，把 `qpt-5.4` 和 `qlaude-opus-4-6` 当做自定义模型添加进去！否则 One API 会嫌弃它们并发个 `no available channels` 报错。
 
 ---
 

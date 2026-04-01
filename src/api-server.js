@@ -76,13 +76,13 @@ export function createBridgeServer(onebotClient) {
       object: 'list',
       data: [
         {
-          id: 'qq-group-chat',
+          id: 'qpt-5.4',
           object: 'model',
           created: Math.floor(Date.now() / 1000),
           owned_by: 'qq-bridge',
         },
         {
-          id: 'qq-private-chat',
+          id: 'qlaude-opus-4-6',
           object: 'model',
           created: Math.floor(Date.now() / 1000),
           owned_by: 'qq-bridge',
@@ -181,7 +181,7 @@ export function createBridgeServer(onebotClient) {
         id: completionId,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model: model || 'qq-group-chat',
+        model: model || 'qpt-5.4',
         choices: [
           {
             index: 0,
@@ -204,7 +204,7 @@ export function createBridgeServer(onebotClient) {
           id: completionId,
           object: 'chat.completion.chunk',
           created: Math.floor(Date.now() / 1000),
-          model: model || 'qq-group-chat',
+          model: model || 'qpt-5.4',
           choices: [
             {
               index: 0,
@@ -219,7 +219,7 @@ export function createBridgeServer(onebotClient) {
           id: completionId,
           object: 'chat.completion.chunk',
           created: Math.floor(Date.now() / 1000),
-          model: model || 'qq-group-chat',
+          model: model || 'qpt-5.4',
           choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
         };
         res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
